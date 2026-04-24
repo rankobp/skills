@@ -1,0 +1,23 @@
+{
+  "skill_name": "nitpicker",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I just finished implementing user registration with email verification. Can you review my code?",
+      "expected_output": "Deploys a review panel (at least Code Quality, Security, Test Coverage). Gathers diff via git. Presents a structured work plan with findings, severity, and parallelization groups. Asks for user approval before fixing anything.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Review PR #5 for security issues",
+      "expected_output": "Uses github_pull_request_read to get the PR diff instead of git commands. Deploys Security reviewer plus relevant domains. Focuses on security but also covers other relevant domains.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "I refactored the data processing pipeline to use streaming instead of loading everything into memory. Nitpick this for me.",
+      "expected_output": "Deploys Performance, Code Quality, and Test Coverage reviewers at minimum. Evaluates whether the streaming approach is correctly implemented (not just moved code around). Checks for resource leaks, error handling in streams, and proper cleanup.",
+      "files": []
+    }
+  ]
+}
