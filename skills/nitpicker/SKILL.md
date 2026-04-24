@@ -10,6 +10,10 @@ description: >
   "check correctness", "code review", "nitpick this", "roast my code", "what's wrong with this",
   or after any implementation is completed. Also triggers when the user asks to verify, validate,
   quality-check, or critique completed work.
+license: MIT
+metadata:
+  author: rankobp
+  version: "0.1.0"
 ---
 
 # Nitpicker
