@@ -1,3 +1,3 @@
 # Agent Skills Spec
 
-The spec is now located at <https://agentskills.io/specification>
+The spec is located at <https://agentskills.io/specification>

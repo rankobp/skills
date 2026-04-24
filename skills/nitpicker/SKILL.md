@@ -112,41 +112,10 @@ More reviewers means more parallel sub-agents, which costs time and tokens. Use 
 
 ### Spawning Reviewers
 
-Spawn ALL selected reviewers **in parallel** in a single turn. For each, use the Task tool with `general` sub-agent type and this prompt structure:
-
-```
-You are an expert <domain> reviewer. Perform a deep, impartial review of the code changes below.
-
-<domain-specific brief from references/review-domains.md>
-
-## Context
-<paste shared context package>
-
-## Changed File Contents
-<paste the FULL contents of each changed file relevant to your domain, not just the diff hunks. Reviewers need surrounding context to evaluate patterns, naming, and structure.>
-
-## Your Task
-Review ONLY your domain. Ignore concerns outside your specialty — other reviewers handle those.
-
-## Output Format
-Use this exact format — the coordinator needs to parse your findings:
-
-### [<Domain>] Review Report
-
-#### Findings
-For each finding, use this format:
-- **[ID]** SEVERITY: critical|significant|minor | FILE: path/to/file:line
-  Description of the issue.
-  Suggested fix: <specific, actionable fix>
-
-#### No Issues Found
-(Explicitly state this if your domain is clean — the coordinator needs to know you covered it.)
-
-#### Positive Observations
-- What was done well in your domain.
-
-Use domain-prefixed sequential IDs: `<domain-prefix>-C1, <domain-prefix>-C2...` for critical; `<domain-prefix>-S1, <domain-prefix>-S2...` for significant; `<domain-prefix>-M1, <domain-prefix>-M2...` for minor. Use these prefixes: `corr` (Correctness), `qual` (Code Quality), `sec` (Security), `perf` (Performance), `conc` (Concurrency), `api` (API Design), `test` (Test Coverage), `fe` (Frontend), `arch` (Architecture).
-```
+Spawn ALL selected reviewers **in parallel** in a single turn. Read `agents/reviewer.md` for the full prompt template, then construct each reviewer's prompt by:
+1. Pasting the domain brief from `references/review-domains.md`
+2. Pasting the shared context package from Phase 2
+3. Pasting the full contents of changed files relevant to that domain
 
 **Important**: Do not wait for reviewers one at a time. Spawn all of them simultaneously so they run in parallel.
 
@@ -232,7 +201,7 @@ Once the user approves (or adjusts) the work plan:
 
 ### Fix Prompt Construction
 
-For each approved finding, spawn a `general` sub-agent with this information in the prompt:
+For each approved finding, spawn a `general` sub-agent using the prompt template from `agents/fix-executor.md`. Read that file for the full template, then fill in:
 - The exact finding (description, file, line, suggested fix)
 - The relevant file contents
 - Project conventions from AGENTS.md
@@ -264,20 +233,23 @@ After execution, summarize:
 - Build/lint results
 - Any issues encountered during fixes
 
-## Phase 7: Verify Fixes (Optional)
+## Phase 7: Verify Fixes
 
-If the fixes were significant (critical or significant findings), consider a lightweight re-review:
+If the fixes were significant (critical or significant findings), run a verification pass:
 
 1. `git diff origin/<base>...HEAD` to get the updated diff (including fixes).
-2. Spawn a single `general` sub-agent with the original findings list and the updated diff.
-3. Prompt: "Verify these fixes were applied correctly. Check that each finding is resolved and no new issues were introduced."
-4. Report results to the user.
+2. Spawn a single `general` sub-agent using the prompt template from `agents/fix-verifier.md`. Read that file for the full template, then fill in the original findings list, the updated diff, and the updated file contents.
+3. Report results to the user. If the verifier finds regressions, present them immediately — do not attempt to fix without user approval.
 
-Skip this step for minor-only findings or if the user wants to move on.
+Skip this step for 1-2 minor-only fixes where the changes are trivial, or if the user wants to move on.
 
 ## Reference Files
 
 - `references/review-domains.md` — Full domain definitions, deployment rules, and detailed reviewer briefs. Read this when building the reviewer panel prompts.
+- `agents/reviewer.md` — Prompt template for spawning reviewer sub-agents. Read this when constructing reviewer prompts in Phase 3.
+- `agents/fix-executor.md` — Prompt template for spawning fix sub-agents. Read this when constructing fix prompts in Phase 6.
+- `agents/fix-verifier.md` — Prompt template for the post-fix verification agent. Read this when running Phase 7.
+- `evals/evals.json` — Test scenarios for verifying the skill works in your environment.
 
 ## Important Notes
 
