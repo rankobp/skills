@@ -1,0 +1,291 @@
+---
+name: nitpicker
+description: >
+  Multi-agent post-implementation code review. Deploys a panel of specialist sub-agents in parallel —
+  each focused on one domain (correctness, security, performance, concurrency, code quality, API design,
+  test coverage, frontend, architecture). The coordinator merges their reports into a prioritized work plan,
+  presents it for user approval, then dispatches fixes in parallel across specialist sub-agents.
+  Use this skill after completing an implementation task — whether it's a feature, bugfix,
+  refactoring, or any code change. Triggers on: "review the changes", "review my code",
+  "check correctness", "code review", "nitpick this", "roast my code", "what's wrong with this",
+  or after any implementation is completed. Also triggers when the user asks to verify, validate,
+  quality-check, or critique completed work.
+---
+
+# Nitpicker
+
+This skill orchestrates a multi-agent code review pipeline:
+
+1. **Scope & Gather** — determine what to review and collect context
+2. **Deploy Review Panel** — spawn specialist sub-agents in parallel, each reviewing one domain
+3. **Merge & Organize** — collect reports, deduplicate, build a structured work plan
+4. **Approve** — present the plan to the user for sign-off
+5. **Execute** — dispatch approved fixes in parallel via specialist sub-agents
+
+The coordinator (you, the agent using this skill) never reviews code directly. You orchestrate.
+
+## When to Use
+
+- After completing any implementation task (feature, bugfix, refactoring)
+- When the user asks to review, verify, validate, or quality-check code
+- When the user says "nitpick this", "review my code", "roast my code", "what's wrong"
+- Before committing or creating a PR for significant changes
+- Do NOT use for trivial one-line changes where the issue is obvious
+
+## Phase 1: Determine Review Scope
+
+Before deploying reviewers, figure out what this review is against:
+
+1. **Check for a PR.** If the user mentions a PR number or URL, use `github_pull_request_read` with `get_diff` and `get_files` to get the changes directly — skip the git-based diff collection in Phase 2.
+2. **Check if the issue context is clear.** Look at the conversation — was an issue number mentioned? Is there a clear description of what was implemented? Can you infer from the branch name?
+3. **If you are NOT 100% clear on the requirements**, ask:
+   > "I'm not sure which issue/ticket this is for. General code quality review, or can you provide an issue number so I can review against specific requirements?"
+4. **If the user provides an issue number** (or you can identify it confidently), fetch details:
+   - **GitHub**: Use `github_issue_read` with the issue number and `owner`/`repo` from AGENTS.md
+   - **Other platforms**: Use whatever issue-tracking tools are available in the current environment. If no suitable tool exists, ask the user to paste the issue details.
+5. **If general quality review**, skip requirements-checking and focus on quality domains.
+
+Never guess at requirements. When in doubt, ask.
+
+## Phase 2: Gather Context
+
+Collect everything the review panel needs:
+
+**Get the diff:**
+
+If reviewing a PR, you already have the diff from Phase 1. Otherwise:
+
+1. Determine base branch (`origin/master` or `origin/main` — check `git remote`).
+2. `git fetch origin` to get latest base state.
+3. `git diff origin/<base>...HEAD` — triple-dot gives only branch changes.
+4. `git diff --name-only origin/<base>...HEAD` — list of changed files.
+5. **If the diff is empty**, try these fallbacks in order:
+   - `git diff HEAD~1...HEAD` (last commit only)
+   - `git diff --cached` (staged changes)
+   - `git diff` (unstaged changes)
+   - If all are empty, tell the user: "I can't find any changes to review. Are there uncommitted changes, or should I compare against a specific commit?"
+6. If the diff fails or looks wrong (stale branch), tell the user and offer to rebase first.
+
+**Filter changed files:**
+
+Remove files that reviewers should not waste time on:
+- Lock files: `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `Gemfile.lock`, `poetry.lock`, etc.
+- Generated/minified files: `*.min.js`, `*.min.css`, `*.generated.*`, `*.pb.go`
+- Binary assets: images, fonts, compiled binaries, `.woff`, `.png`, `.jpg`
+- Vendored dependencies: `vendor/`, `node_modules/`, `third_party/`
+
+**Fetch issue details (if issue-driven):**
+
+- Read the issue body for acceptance criteria and the comments for scope clarifications.
+- Read ALL filtered changed files — the reviewers need full file contents, not just diff hunks.
+
+**Build the shared context package** that every reviewer sub-agent receives:
+
+```
+## Review Context
+- Branch: <name>
+- Base: origin/<base>
+- Issue: <number and title, or "General quality review">
+- Requirements: <acceptance criteria summary>
+- Changed files: <filtered list>
+- Technology stack: <from AGENTS.md>
+
+<full diff>
+```
+
+**Large diff handling:**
+
+If the diff exceeds ~500 lines, do not reduce the number of reviewers. Instead, partition the changed files by domain relevance and give each reviewer only the files relevant to their specialty, plus a summary of the full change. Include the filtered file list in the shared context so reviewers know what else changed.
+
+## Phase 3: Deploy Review Panel
+
+Read `references/review-domains.md` for the full domain definitions, deployment rules, and reviewer briefs. That file is the authoritative source for which domains exist and when to deploy each.
+
+### Panel Size
+
+More reviewers means more parallel sub-agents, which costs time and tokens. Use judgment:
+
+- **2-3 reviewers** — simple bugfix, small scope, few files changed. Non-issue-driven: Code Quality + Test Coverage. Issue-driven: add Correctness.
+- **4-5 reviewers** — typical feature, moderate scope
+- **6-8 reviewers** — large feature, full-stack changes, cross-cutting concerns
+- **Cap at 8** — beyond this, coordination overhead exceeds value. Combine related domains (e.g., correctness + code quality, performance + concurrency).
+
+### Spawning Reviewers
+
+Spawn ALL selected reviewers **in parallel** in a single turn. For each, use the Task tool with `general` sub-agent type and this prompt structure:
+
+```
+You are an expert <domain> reviewer. Perform a deep, impartial review of the code changes below.
+
+<domain-specific brief from references/review-domains.md>
+
+## Context
+<paste shared context package>
+
+## Changed File Contents
+<paste the FULL contents of each changed file relevant to your domain, not just the diff hunks. Reviewers need surrounding context to evaluate patterns, naming, and structure.>
+
+## Your Task
+Review ONLY your domain. Ignore concerns outside your specialty — other reviewers handle those.
+
+## Output Format
+Use this exact format — the coordinator needs to parse your findings:
+
+### [<Domain>] Review Report
+
+#### Findings
+For each finding, use this format:
+- **[ID]** SEVERITY: critical|significant|minor | FILE: path/to/file:line
+  Description of the issue.
+  Suggested fix: <specific, actionable fix>
+
+#### No Issues Found
+(Explicitly state this if your domain is clean — the coordinator needs to know you covered it.)
+
+#### Positive Observations
+- What was done well in your domain.
+
+Use domain-prefixed sequential IDs: `<domain-prefix>-C1, <domain-prefix>-C2...` for critical; `<domain-prefix>-S1, <domain-prefix>-S2...` for significant; `<domain-prefix>-M1, <domain-prefix>-M2...` for minor. Use these prefixes: `corr` (Correctness), `qual` (Code Quality), `sec` (Security), `perf` (Performance), `conc` (Concurrency), `api` (API Design), `test` (Test Coverage), `fe` (Frontend), `arch` (Architecture).
+```
+
+**Important**: Do not wait for reviewers one at a time. Spawn all of them simultaneously so they run in parallel.
+
+### Handling Reviewer Failures
+
+If a reviewer sub-agent times out or fails:
+- **Non-critical domain** (Frontend, Architecture, API Design): skip it, note the gap in the final report.
+- **Core domain** (Code Quality, Security, Test Coverage, Correctness): retry once. If it fails again, tell the user which domain couldn't be reviewed and offer to rerun just that one.
+
+## Phase 4: Merge Reports & Organize Work Plan
+
+As each reviewer completes, collect their report. Once ALL reviewers have reported (or been skipped per failure rules):
+
+### Merge Findings
+
+1. **Collect** all findings into a single list. Each finding already has a domain-prefixed ID (e.g., `sec-C1`, `perf-S1`).
+2. **Deduplicate** — when multiple reviewers flag the same or overlapping issues:
+   - **Same code location, same concern**: Merge into one finding. Use the ID from the domain with highest expertise (security > code quality, performance > code quality). Combine descriptions.
+   - **Same code location, different concerns**: Merge into one finding led by the higher-expertise domain, with separate sub-items for each concern. Example: security flags SQL injection AND code quality flags string concatenation on the same line — one finding led by security, with the code quality concern as a secondary aspect.
+   - **Same root cause, different locations**: Group as one finding with multiple affected files. Example: missing validation on three endpoints = one finding with three file references.
+   - **Severity rule**: When merging, use the highest severity among the duplicates.
+3. **Cross-reference** — identify when seemingly separate findings share a root cause. Group them as a single work item with multiple facets. This prevents the fix phase from doing redundant work.
+
+### Build the Work Plan
+
+Organize merged findings into a structured plan:
+
+```
+## Review Summary
+- Reviewers deployed: <list domains>
+- Total findings: X critical, Y significant, Z minor
+
+## Work Plan
+
+### Priority 1 — Critical (must fix)
+- [ ] **[ID]** <Domain> | File:Line | Description
+  Fix: <suggested fix>
+  Depends on: <none | other IDs>
+
+### Priority 2 — Significant (should fix)
+- [ ] ...
+
+### Priority 3 — Minor (nice to have)
+- [ ] ...
+
+### Parallelization Groups
+- **Group A** (independent, can run simultaneously): [ID1, ID3, ID5]
+- **Group B** (depends on Group A): [ID2, ID4]
+- **Group C** (depends on Group B): [ID6]
+```
+
+The parallelization analysis is key: findings that touch different files with no logical dependency can run in parallel. Findings that modify the same file or depend on a structural change must be sequenced. **Never assign two fixes to the same file in the same parallelization group** — conflicting edits will cause failures.
+
+### Verdict
+
+Based on the findings:
+- **APPROVE** — no critical or significant issues
+- **REQUEST CHANGES** — critical or significant issues found
+- **REJECT** — fundamental problems that require rethinking the approach
+
+## Phase 5: Present Plan & Get User Approval
+
+Present the merged work plan to the user. Show:
+
+1. **Which reviewers were deployed** and a one-line summary of each domain's verdict
+2. **The full findings list** with severity, location, and suggested fix
+3. **The parallelization groups** — explain which fixes can run simultaneously
+4. **The overall verdict**
+
+Then ask:
+> "Here's the review report. <N> critical, <M> significant, <K> minor findings.
+> The work is organized into <X> parallel groups. Would you like to:
+> 1. Fix everything as planned
+> 2. Fix only specific items (tell me which)
+> 3. Skip fixes — you'll handle them yourself
+> 4. Adjust the plan first"
+
+Wait for the user's response before proceeding to execution. Do not start fixing anything without explicit approval.
+
+## Phase 6: Execute Approved Fixes
+
+Once the user approves (or adjusts) the work plan:
+
+### Fix Prompt Construction
+
+For each approved finding, spawn a `general` sub-agent with this information in the prompt:
+- The exact finding (description, file, line, suggested fix)
+- The relevant file contents
+- Project conventions from AGENTS.md
+- Any dependencies on other fixes
+
+The domain expertise comes from the finding description and suggested fix, not from the agent type — all fixes use `general` sub-agents.
+
+### Parallel Execution
+
+1. Start with the first parallelization group — spawn all fixes in that group simultaneously.
+2. Wait for the group to complete. If a fix fails, log the error and continue — do not block the group.
+3. Move to the next group (which may depend on the previous group's changes).
+4. Repeat until all approved fixes are done.
+5. After all fixes, detect the project's build system and run verification:
+   - Check AGENTS.md for explicit build/lint commands first.
+   - `package.json` present → `npm run build` (or `pnpm build`, `yarn build`)
+   - `Cargo.toml` present → `cargo build`
+   - `*.csproj` or `*.sln` present → `dotnet build`
+   - `go.mod` present → `go build ./...`
+   - `Makefile` present → `make`
+6. If the build fails after fixes, report the failure to the user with the error output. Do not attempt to auto-fix build failures — the user decides whether to roll back or fix manually.
+
+### Present Results
+
+After execution, summarize:
+- What was fixed (list each finding with ✓)
+- What was skipped (if user chose partial fix)
+- What failed (if any fixes errored)
+- Build/lint results
+- Any issues encountered during fixes
+
+## Phase 7: Verify Fixes (Optional)
+
+If the fixes were significant (critical or significant findings), consider a lightweight re-review:
+
+1. `git diff origin/<base>...HEAD` to get the updated diff (including fixes).
+2. Spawn a single `general` sub-agent with the original findings list and the updated diff.
+3. Prompt: "Verify these fixes were applied correctly. Check that each finding is resolved and no new issues were introduced."
+4. Report results to the user.
+
+Skip this step for minor-only findings or if the user wants to move on.
+
+## Reference Files
+
+- `references/review-domains.md` — Full domain definitions, deployment rules, and detailed reviewer briefs. Read this when building the reviewer panel prompts.
+
+## Important Notes
+
+- Issue-driven reviews always produce better results than generic quality passes.
+- Never guess requirements — ask when uncertain.
+- The coordinator does not review code. You orchestrate specialists.
+- Every finding needs a file:line reference and a suggested fix.
+- Compare against existing codebase patterns, not abstract ideals.
+- Performance concerns should reference realistic scale, not premature optimization.
+- Deduplication matters — three reviewers flagging the same line should produce one merged finding, not three separate fixes.
+- Filter out lock files, generated files, and vendored code before giving files to reviewers.
