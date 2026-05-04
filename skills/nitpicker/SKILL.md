@@ -36,6 +36,24 @@ The coordinator (you, the agent using this skill) never reviews code directly. Y
 - Before committing or creating a PR for significant changes
 - Do NOT use for trivial one-line changes where the issue is obvious
 
+## Connection Stability
+
+API providers drop connections when the model generates large tool call argument payloads in a single batch. Since nitpicker orchestrates many sub-agents, this is the primary failure mode — the connection dies mid-generation and the entire review stalls.
+
+**Hard limits — never exceed these:**
+- **Max 2-3 tool calls per response** — fewer calls = smaller payload = shorter silence gap
+- **Max 2-3 sub-agents spawned per turn** — batch reviewers and fix executors in groups of 2-3, acknowledge progress between batches, then continue
+- **Keep prompts lean** — don't include full file contents in every reviewer prompt. Partition by domain relevance. Give each reviewer only the files relevant to their specialty plus a summary of the full change
+- **Break complex tasks into steps** — for multi-file changes, do 2-3 files per turn, acknowledge progress, then continue. Do NOT batch 6+ sub-agents in one response
+
+**What this means for each phase:**
+- Phase 2 (Gather): 2-3 file reads per turn. Read diff + reference files in one turn (2-3 calls max).
+- Phase 3 (Deploy): Spawn reviewers in batches of 2-3 per turn. Acknowledge which reviewers were launched, wait for results, then spawn the next batch.
+- Phase 6 (Execute): Same batching — spawn fix agents 2-3 per turn per parallelization group.
+- Phase 7 (Verify): Single agent — no batching needed.
+
+**Between batches, briefly tell the user what's happening** — e.g., "Reviewers 1-3 deployed, waiting for results..." This prevents the appearance of stalling.
+
 ## Phase 1: Determine Review Scope
 
 Before deploying reviewers, figure out what this review is against:
@@ -114,14 +132,22 @@ More reviewers means more parallel sub-agents, which costs time and tokens. Use 
 - **6-8 reviewers** — large feature, full-stack changes, cross-cutting concerns
 - **Cap at 8** — beyond this, coordination overhead exceeds value. Combine related domains (e.g., correctness + code quality, performance + concurrency).
 
-### Spawning Reviewers
+### Spawning Reviewers (Batched)
 
-Spawn ALL selected reviewers **in parallel** in a single turn. Read `agents/reviewer.md` for the full prompt template, then construct each reviewer's prompt by:
+Read `agents/reviewer.md` for the full prompt template, then construct each reviewer's prompt by:
 1. Pasting the domain brief from `references/review-domains.md`
 2. Pasting the shared context package from Phase 2
-3. Pasting the full contents of changed files relevant to that domain
+3. Pasting only the file contents relevant to that domain (not all files for every reviewer — this keeps prompts lean)
 
-**Important**: Do not wait for reviewers one at a time. Spawn all of them simultaneously so they run in parallel.
+**Spawn in batches of 2-3 reviewers per turn** — this is critical for connection stability. Do NOT spawn all reviewers in one turn. The batch workflow:
+
+1. Determine the full panel and note the list for the user.
+2. Spawn the first batch of 2-3 reviewers as parallel sub-agents.
+3. Briefly acknowledge: "Reviewers batch 1 deployed (Correctness, Security, Performance), waiting for results..."
+4. Wait for results, then spawn the next batch of 2-3.
+5. Repeat until all reviewers are done.
+
+This keeps each turn small enough to avoid connection drops while still getting parallelism within each batch.
 
 ### Handling Reviewer Failures
 
@@ -213,11 +239,11 @@ For each approved finding, spawn a `general` sub-agent using the prompt template
 
 The domain expertise comes from the finding description and suggested fix, not from the agent type — all fixes use `general` sub-agents.
 
-### Parallel Execution
+### Parallel Execution (Batched)
 
-1. Start with the first parallelization group — spawn all fixes in that group simultaneously.
-2. Wait for the group to complete. If a fix fails, log the error and continue — do not block the group.
-3. Move to the next group (which may depend on the previous group's changes).
+1. Start with the first parallelization group — spawn up to 2-3 fix agents simultaneously (connection stability limit). Briefly acknowledge: "Fixing batch: [ID1, ID2]..."
+2. Wait for the batch to complete. If a fix fails, log the error and continue — do not block the batch.
+3. Spawn the next batch of fixes from the same group (or move to the next group if this one is done).
 4. Repeat until all approved fixes are done.
 5. After all fixes, detect the project's build system and run verification:
    - Check AGENTS.md for explicit build/lint commands first.

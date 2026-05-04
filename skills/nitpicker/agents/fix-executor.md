@@ -76,9 +76,10 @@ If you could NOT apply the fix:
 
 ## Coordinator Notes
 
-- Spawn all fixes in the same parallelization group simultaneously.
+- Spawn fixes in **batches of 2-3 per turn**, not all at once. Connection stability requires keeping each turn small.
 - Each fix is a `general` sub-agent with this prompt.
 - Never assign two fixes to the same file in the same parallelization group — conflicting edits will cause failures.
 - After all fixes in a group complete, check for any "Fix Failed" reports before moving to the next group.
 - After all groups complete, run the project's build/lint to verify (see SKILL.md Phase 6).
 - If a fix agent reports failure, include it in the results summary for the user.
+- Between batches, briefly tell the user what's happening (e.g., "Fixing batch 1/2...").
