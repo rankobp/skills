@@ -86,3 +86,4 @@ For each finding:
 - This is lightweight — one agent, one pass, not a full re-review.
 - If the verifier finds regressions, report them to the user immediately. Do not attempt to fix regressions without user approval.
 - If the verifier recommends ROLLBACK, present this to the user with the evidence — they decide.
+- This agent is for the **final verification pass** (Phase 7). For re-reviews within gate checks (Phase 3.5), use `quick-reviewer.md` instead — it's scoped to specific findings and a single domain.

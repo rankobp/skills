@@ -2,19 +2,43 @@
 
 This file defines the specialist review domains, when to deploy each, and the detailed brief each reviewer receives.
 
+## Severity Scale
+
+All reviewers use this 5-level severity scale:
+
+| Level | Label | Gate Behavior |
+|-------|-------|---------------|
+| 4 | **FATAL** | Hard gate — strongly recommend fix or abort before further review |
+| 3 | **ERROR** | Gate — ask user; recommend fix before continuing |
+| 2 | **WARNING** | Gate — ask user whether to fix or continue |
+| 1 | **INFO** | No gate — continue automatically |
+| 0 | **PASSED** | No issues found — continue automatically |
+
+Only FATAL/ERROR/WARNING trigger gates. INFO and PASSED flow through without stopping.
+
 ## Deployment Rules
 
-| Domain | Deploy When | Sub-agent |
-|--------|------------|-----------|
-| Correctness | Always (if issue-driven) | `general` |
-| Code Quality | Always | `general` |
-| Security | Auth, API endpoints, user input, data handling, crypto changed | `general` |
-| Performance | DB queries, data processing, loops, async code, collections changed | `general` |
-| Concurrency | Async code, shared state, background workers, concurrent access | `general` |
-| API Design | New/modified API endpoints, middleware, DI registration | `general` |
-| Test Coverage | Any testable logic added/modified (nearly always) | `general` |
-| Frontend | UI files changed (components, templates, styles, client-side logic) | `general` |
-| Architecture | New modules, structural changes, cross-cutting concerns | `general` |
+| Domain | Tier | Deploy When | Sub-agent |
+|--------|------|-------------|-----------|
+| Correctness | 1 | Always (if issue-driven) | `general` |
+| Security | 2 | Auth, API endpoints, user input, data handling, crypto changed | `general` |
+| Architecture | 2 | New modules, structural changes, cross-cutting concerns | `general` |
+| Code Quality | 3 | Always | `general` |
+| Performance | 3 | DB queries, data processing, loops, async code, collections changed | `general` |
+| Concurrency | 3 | Async code, shared state, background workers, concurrent access | `general` |
+| API Design | 4 | New/modified API endpoints, middleware, DI registration | `general` |
+| Test Coverage | 4 | Any testable logic added/modified (nearly always) | `general` |
+| Frontend | 4 | UI files changed (components, templates, styles, client-side logic) | `general` |
+
+### Tier Logic
+
+Tiers run **sequentially** — Tier 1 completes before Tier 2 starts, etc. Within each tier, reviewers run per the user's execution mode (parallel batches or sequential).
+
+**Why this order:**
+- **Tier 1 (Correctness):** If the logic is fundamentally wrong, nothing else matters.
+- **Tier 2 (Security, Architecture):** Structural integrity — safety and soundness.
+- **Tier 3 (Code Quality, Performance, Concurrency):** Quality of implementation.
+- **Tier 4 (API Design, Test Coverage, Frontend):** Polish and completeness.
 
 Minimum panel: 3 (correctness + code quality + test coverage for simple bugfixes).
 Full-stack feature: 6-8 specialists.
@@ -27,7 +51,7 @@ When spawning a reviewer, include their full brief from below in the sub-agent p
 
 ---
 
-### Correctness
+### Correctness (Tier 1)
 
 **Trigger:** Always, when reviewing against a specific issue/ticket with acceptance criteria.
 
@@ -46,13 +70,14 @@ Check:
 Ignore: performance, style, test coverage, architecture — other reviewers own those.
 
 **Severity guidelines:**
-- **Critical:** Code violates a stated acceptance criterion or produces wrong results for expected inputs.
-- **Significant:** Edge case that could cause incorrect behavior in realistic scenarios.
-- **Minor:** Cosmetic or unlikely edge case with minimal impact.
+- **FATAL:** The entire approach is fundamentally flawed — the implementation cannot satisfy the requirements without major rethinking or rewriting.
+- **ERROR:** Code violates a stated acceptance criterion or produces wrong results for expected inputs.
+- **WARNING:** Edge case that could cause incorrect behavior in realistic scenarios.
+- **INFO:** Cosmetic or unlikely edge case with minimal impact.
 
 ---
 
-### Code Quality
+### Code Quality (Tier 3)
 
 **Trigger:** Always.
 
@@ -73,13 +98,14 @@ Check:
 Ignore: correctness of logic, test coverage, architecture decisions — other reviewers own those.
 
 **Severity guidelines:**
-- **Critical:** Duplicated logic across files, or code that is fundamentally misleading/hard to reason about.
-- **Significant:** Violation of project conventions, significant dead code, unclear naming that obscures intent.
-- **Minor:** Style inconsistencies, minor naming improvements, unnecessary complexity.
+- **FATAL:** Code is fundamentally misleading or impossible to reason about — the structure actively obscures what it does.
+- **ERROR:** Duplicated logic across files, or code that is fundamentally misleading/hard to reason about.
+- **WARNING:** Violation of project conventions, significant dead code, unclear naming that obscures intent.
+- **INFO:** Style inconsistencies, minor naming improvements, unnecessary complexity.
 
 ---
 
-### Security
+### Security (Tier 2)
 
 **Trigger:** Auth, API endpoints, user input handling, data processing, cryptographic operations, or any file that touches sensitive data.
 
@@ -99,13 +125,14 @@ Check:
 Ignore: performance, style, test quality — other reviewers own those. Only flag code quality issues if they create a security risk.
 
 **Severity guidelines:**
-- **Critical:** Exploitable vulnerability (injection, auth bypass, data exposure).
-- **Significant:** Weakness that could become exploitable under realistic conditions (missing validation on non-public endpoint, verbose error messages leaking internal state).
-- **Minor:** Defense-in-depth improvement (adding rate limiting, tightening CORS).
+- **FATAL:** Exploitable vulnerability with severe impact (auth bypass, mass data exposure, RCE).
+- **ERROR:** Exploitable vulnerability (injection, auth bypass, data exposure).
+- **WARNING:** Weakness that could become exploitable under realistic conditions (missing validation on non-public endpoint, verbose error messages leaking internal state).
+- **INFO:** Defense-in-depth improvement (adding rate limiting, tightening CORS).
 
 ---
 
-### Performance
+### Performance (Tier 3)
 
 **Trigger:** DB queries, data processing pipelines, loops over collections, async code, caching logic, or any file in a hot path.
 
@@ -127,13 +154,14 @@ Judge against realistic scale, not theoretical limits. A loop over 10 items is f
 Ignore: code style, test coverage, architecture — other reviewers own those.
 
 **Severity guidelines:**
-- **Critical:** Will cause visible degradation or failure under normal load (N+1 on a list endpoint, unbounded query).
-- **Significant:** Will degrade under scale or is noticeably wasteful (missing index, unnecessary allocation in a hot path).
-- **Minor:** Minor optimization opportunity with no current user impact.
+- **FATAL:** Will cause system failure or complete unresponsiveness under normal load.
+- **ERROR:** Will cause visible degradation or failure under normal load (N+1 on a list endpoint, unbounded query).
+- **WARNING:** Will degrade under scale or is noticeably wasteful (missing index, unnecessary allocation in a hot path).
+- **INFO:** Minor optimization opportunity with no current user impact.
 
 ---
 
-### Concurrency
+### Concurrency (Tier 3)
 
 **Trigger:** Async/await code, shared mutable state, background workers, concurrent collections, locks, or any code that runs in a multi-threaded context.
 
@@ -153,13 +181,14 @@ Check:
 Ignore: general async best practices that don't involve correctness (those belong to performance or code quality).
 
 **Severity guidelines:**
-- **Critical:** Race condition or deadlock that will occur under normal usage.
-- **Significant:** Concurrency issue that could manifest under realistic load or specific timing.
-- **Minor:** Best practice improvement (adding cancellation/timeout handling where unlikely to matter).
+- **FATAL:** Race condition or deadlock that will cause data corruption or system failure under normal usage.
+- **ERROR:** Race condition or deadlock that will occur under normal usage.
+- **WARNING:** Concurrency issue that could manifest under realistic load or specific timing.
+- **INFO:** Best practice improvement (adding cancellation/timeout handling where unlikely to matter).
 
 ---
 
-### API Design
+### API Design (Tier 4)
 
 **Trigger:** New or modified API endpoints, middleware, DI registration, or public interface changes.
 
@@ -180,13 +209,14 @@ Check:
 Ignore: security of endpoints (security reviewer), performance of handlers (performance reviewer), test coverage.
 
 **Severity guidelines:**
-- **Critical:** API contract is wrong or misleading (wrong HTTP method, missing required field validation).
-- **Significant:** Inconsistency with project API patterns, unclear naming, missing error handling.
-- **Minor:** Documentation gap, minor naming improvement.
+- **FATAL:** API contract is fundamentally broken or dangerous (public endpoint with no auth, wrong HTTP method causing data loss).
+- **ERROR:** API contract is wrong or misleading (wrong HTTP method, missing required field validation).
+- **WARNING:** Inconsistency with project API patterns, unclear naming, missing error handling.
+- **INFO:** Documentation gap, minor naming improvement.
 
 ---
 
-### Test Coverage
+### Test Coverage (Tier 4)
 
 **Trigger:** Any testable logic was added or modified (nearly always deploy this reviewer).
 
@@ -209,13 +239,14 @@ Compare against the project's existing test patterns and conventions. If the pro
 Ignore: code correctness, performance, style — other reviewers own those.
 
 **Severity guidelines:**
-- **Critical:** No tests at all for critical business logic or a bug fix with no regression test.
-- **Significant:** Missing edge case tests, over-mocked tests that don't verify real behavior, tests that only cover the happy path.
-- **Minor:** Test naming inconsistency, minor test quality improvement.
+- **FATAL:** Critical business logic with zero tests AND the implementation has known correctness issues.
+- **ERROR:** No tests at all for critical business logic or a bug fix with no regression test.
+- **WARNING:** Missing edge case tests, over-mocked tests that don't verify real behavior, tests that only cover the happy path.
+- **INFO:** Test naming inconsistency, minor test quality improvement.
 
 ---
 
-### Frontend
+### Frontend (Tier 4)
 
 **Trigger:** UI files changed — TypeScript/JavaScript, JSX/TSX, HTML, CSS/SCSS, component files, or any framework-specific template files.
 
@@ -236,13 +267,14 @@ Check:
 Ignore: backend logic, API design, security of endpoints — other reviewers own those.
 
 **Severity guidelines:**
-- **Critical:** Broken UI for expected use cases, accessibility violation that blocks users.
-- **Significant:** Inconsistency with project patterns, missing error/loading states, performance issue visible to users.
-- **Minor:** Style inconsistency, minor accessibility improvement, minor refactor opportunity.
+- **FATAL:** UI is completely broken or inaccessible for all users.
+- **ERROR:** Broken UI for expected use cases, accessibility violation that blocks users.
+- **WARNING:** Inconsistency with project patterns, missing error/loading states, performance issue visible to users.
+- **INFO:** Style inconsistency, minor accessibility improvement, minor refactor opportunity.
 
 ---
 
-### Architecture
+### Architecture (Tier 2)
 
 **Trigger:** New modules/projects added, structural changes, cross-cutting concerns modified, or changes to dependency injection/configuration/startup.
 
@@ -264,6 +296,7 @@ Compare against the project's existing architecture, not an idealized clean arch
 Ignore: code style details, individual test quality, minor performance — other reviewers own those.
 
 **Severity guidelines:**
-- **Critical:** Architectural boundary violation that will cause maintenance problems (e.g., direct DB access from UI layer).
-- **Significant:** Inconsistency with established patterns, unnecessary coupling, premature abstraction.
-- **Minor:** Minor organizational improvement, config that could be externalized.
+- **FATAL:** Architectural change that will cause cascading problems across the system (e.g., bypassing a security layer entirely).
+- **ERROR:** Architectural boundary violation that will cause maintenance problems (e.g., direct DB access from UI layer).
+- **WARNING:** Inconsistency with established patterns, unnecessary coupling, premature abstraction.
+- **INFO:** Minor organizational improvement, config that could be externalized.
