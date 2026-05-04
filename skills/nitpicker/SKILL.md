@@ -13,7 +13,7 @@ description: >
 license: MIT
 metadata:
   author: rankobp
-  version: "0.1.0"
+  version: "0.2.0"
 ---
 
 # Nitpicker
@@ -38,7 +38,9 @@ The coordinator (you, the agent using this skill) never reviews code directly. Y
 
 ## Connection Stability
 
-API providers drop connections when the model generates large tool call argument payloads in a single batch. Since nitpicker orchestrates many sub-agents, this is the primary failure mode — the connection dies mid-generation and the entire review stalls.
+API providers drop connections when the model generates large tool call argument payloads in a single batch. The connection stability limit is about **tool call payload SIZE**, not about thinking too long. A single `task` spawn with a 2000-word prompt is fine. The danger is spawning 6+ sub-agents with 5000-word prompts each in a single turn.
+
+**The most common failure mode is NOT connection drops — it's the coordinator stalling in Phase 2, reading "just one more file" before deploying reviewers. Resist this. The diff is enough. Deploy reviewers.**
 
 **Hard limits — never exceed these:**
 - **Max 2-3 tool calls per response** — fewer calls = smaller payload = shorter silence gap
@@ -47,7 +49,8 @@ API providers drop connections when the model generates large tool call argument
 - **Break complex tasks into steps** — for multi-file changes, do 2-3 files per turn, acknowledge progress, then continue. Do NOT batch 6+ sub-agents in one response
 
 **What this means for each phase:**
-- Phase 2 (Gather): 2-3 file reads per turn. Read diff + reference files in one turn (2-3 calls max).
+- Phase 1 (Scope): Fetch issue details in ONE call. Do NOT read issue comments separately — get them all in one go.
+- Phase 2 (Gather): ONE turn max. Fetch the diff + file list. That's it. Do NOT read entity files, reference files, or upstream dependencies here.
 - Phase 3 (Deploy): Spawn reviewers in batches of 2-3 per turn. Acknowledge which reviewers were launched, wait for results, then spawn the next batch.
 - Phase 6 (Execute): Same batching — spawn fix agents 2-3 per turn per parallelization group.
 - Phase 7 (Verify): Single agent — no batching needed.
@@ -96,12 +99,9 @@ Remove files that reviewers should not waste time on:
 - Binary assets: images, fonts, compiled binaries, `.woff`, `.png`, `.jpg`
 - Vendored dependencies: `vendor/`, `node_modules/`, `third_party/`
 
-**Fetch issue details (if issue-driven):**
+**Build the shared context package** — use the diff you already collected. The diff IS the context. For newly added files, the diff contains the entire file — no need to read it again. For modified files with small diffs (< 10 lines), the hunks provide sufficient context.
 
-- Read the issue body for acceptance criteria and the comments for scope clarifications.
-- Read ALL filtered changed files — the reviewers need full file contents, not just diff hunks.
-
-**Build the shared context package** that every reviewer sub-agent receives:
+**Build the shared context package:**
 
 ```
 ## Review Context
@@ -114,6 +114,12 @@ Remove files that reviewers should not waste time on:
 
 <full diff>
 ```
+
+### Phase 2 Hard Stop
+
+After collecting the diff and filtered file list, **you must proceed to Phase 3 in your very next turn.** Do NOT read additional entity files, reference files, or upstream dependencies. Reviewers review what changed, not the entire dependency graph. If a reviewer truly needs more context, they will note it in their report — you can address it then.
+
+The only exception: if the diff is for a modified file with less than 10 lines changed and the surrounding context is unclear, you may read that one file. But this should be rare.
 
 **Large diff handling:**
 
@@ -136,8 +142,10 @@ More reviewers means more parallel sub-agents, which costs time and tokens. Use 
 
 Read `agents/reviewer.md` for the full prompt template, then construct each reviewer's prompt by:
 1. Pasting the domain brief from `references/review-domains.md`
-2. Pasting the shared context package from Phase 2
+2. Pasting the shared context package from Phase 2 (the diff you already have — do NOT re-read files)
 3. Pasting only the file contents relevant to that domain (not all files for every reviewer — this keeps prompts lean)
+
+If you have not yet read `references/review-domains.md` and `agents/reviewer.md`, read them NOW (one turn, both files). Then immediately proceed to spawning reviewers in the NEXT turn. Do NOT interleave any other file reads.
 
 **Spawn in batches of 2-3 reviewers per turn** — this is critical for connection stability. Do NOT spawn all reviewers in one turn. The batch workflow:
 
