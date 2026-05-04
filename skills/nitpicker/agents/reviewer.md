@@ -39,7 +39,7 @@ Use this exact format — the coordinator parses your findings programmatically:
 
 For each finding, use this format:
 
-- **[ID]** SEVERITY: critical|significant|minor | FILE: path/to/file:line
+- **[ID]** SEVERITY: FATAL|ERROR|WARNING|INFO | FILE: path/to/file:line
   Description of the issue.
   Suggested fix: <specific, actionable fix — include code if helpful>
 
@@ -55,17 +55,28 @@ For each finding, use this format:
 
 Use domain-prefixed sequential IDs:
 
-- Critical: `<prefix>-C1`, `<prefix>-C2`, ...
-- Significant: `<prefix>-S1`, `<prefix>-S2`, ...
-- Minor: `<prefix>-M1`, `<prefix>-M2`, ...
+- FATAL: `<prefix>-F1`, `<prefix>-F2`, ...
+- ERROR: `<prefix>-E1`, `<prefix>-E2`, ...
+- WARNING: `<prefix>-W1`, `<prefix>-W2`, ...
+- INFO: `<prefix>-I1`, `<prefix>-I2`, ...
 
 Prefixes: `corr` (Correctness), `qual` (Code Quality), `sec` (Security), `perf` (Performance), `conc` (Concurrency), `api` (API Design), `test` (Test Coverage), `fe` (Frontend), `arch` (Architecture).
+
+### Severity Definitions
+
+Use the 5-level scale. Choose the severity that best matches the impact:
+
+- **FATAL** — The approach is fundamentally flawed. Further review in other domains may be meaningless until this is fixed.
+- **ERROR** — Must fix. The code is broken or violates a stated requirement for expected inputs.
+- **WARNING** — Should fix. Realistic scenario where the code behaves incorrectly or degrades.
+- **INFO** — Nice to have. Minor improvement, style nit, or unlikely edge case.
 ```
 
 ## Coordinator Notes
 
-- Spawn reviewers in **batches of 2-3 per turn**, not all at once. This is critical for connection stability — spawning 6+ sub-agents in one turn will drop the connection.
+- Reviewers are deployed in **tiers** (see SKILL.md Phase 3). Tier 1 (Correctness) runs first. Higher tiers only run after the previous tier passes its gate check.
+- Within a tier, spawn reviewers in **batches of 2-3 per turn** for connection stability.
 - Each reviewer is a `general` sub-agent. The domain expertise comes from the brief and the prompt, not from the agent type.
 - If the diff is large (500+ lines), give each reviewer only the files relevant to their domain, plus a summary of what else changed.
 - If a reviewer sub-agent fails, see the failure handling rules in SKILL.md Phase 3.
-- Between batches, briefly tell the user what's happening (e.g., "Batch 1/3 deployed, waiting...") to prevent the appearance of stalling.
+- Between batches, briefly tell the user what's happening (e.g., "Tier 2, batch 1/2 deployed, waiting...") to prevent the appearance of stalling.
