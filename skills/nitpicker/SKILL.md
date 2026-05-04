@@ -13,7 +13,7 @@ description: >
 license: MIT
 metadata:
   author: rankobp
-  version: "0.2.0"
+  version: "0.3.0"
 ---
 
 # Nitpicker
@@ -36,26 +36,49 @@ The coordinator (you, the agent using this skill) never reviews code directly. Y
 - Before committing or creating a PR for significant changes
 - Do NOT use for trivial one-line changes where the issue is obvious
 
+## Execution Mode
+
+Different users run on different setups — some have rock-solid connections, others hit drops with parallel sub-agents. **Ask the user once at the start of every review session** (right after Phase 1, before Phase 3):
+
+> "How should I run the review panel?
+> 1. **Parallel** — spawn 2-3 sub-agents per turn (faster, but may stall on unstable connections)
+> 2. **Sequential** — one sub-agent at a time (slower, but rock-solid)"
+
+Store the answer and respect it throughout the entire review lifecycle (Phase 3 reviewer deployment, Phase 6 fix execution, Phase 7 verification). If the user doesn't answer explicitly, **default to sequential** — it's the safe choice.
+
+The execution mode affects ONLY how many sub-agents you spawn per turn. It does NOT change the review content, domains, or output format.
+
+### Parallel Mode
+
+Spawn 2-3 sub-agents per turn. Acknowledge progress between batches.
+
+- Phase 3 (Deploy): Spawn reviewers in batches of 2-3 per turn.
+- Phase 6 (Execute): Spawn fix agents 2-3 per turn per parallelization group.
+- Phase 7 (Verify): Single agent — no batching needed.
+
+### Sequential Mode
+
+Spawn exactly ONE sub-agent per turn. Wait for it to complete before spawning the next. This is slower but avoids connection drops entirely.
+
+- Phase 3 (Deploy): One reviewer per turn. Tell the user: "Running reviewer 1/N (Correctness)..."
+- Phase 6 (Execute): One fix agent per turn.
+- Phase 7 (Verify): Single agent — same for both modes.
+
 ## Connection Stability
 
 API providers drop connections when the model generates large tool call argument payloads in a single batch. The connection stability limit is about **tool call payload SIZE**, not about thinking too long. A single `task` spawn with a 2000-word prompt is fine. The danger is spawning 6+ sub-agents with 5000-word prompts each in a single turn.
 
 **The most common failure mode is NOT connection drops — it's the coordinator stalling in Phase 2, reading "just one more file" before deploying reviewers. Resist this. The diff is enough. Deploy reviewers.**
 
-**Hard limits — never exceed these:**
-- **Max 2-3 tool calls per response** — fewer calls = smaller payload = shorter silence gap
-- **Max 2-3 sub-agents spawned per turn** — batch reviewers and fix executors in groups of 2-3, acknowledge progress between batches, then continue
+**Hard limits — regardless of execution mode:**
 - **Keep prompts lean** — don't include full file contents in every reviewer prompt. Partition by domain relevance. Give each reviewer only the files relevant to their specialty plus a summary of the full change
-- **Break complex tasks into steps** — for multi-file changes, do 2-3 files per turn, acknowledge progress, then continue. Do NOT batch 6+ sub-agents in one response
+- **Break complex tasks into steps** — for multi-file changes, acknowledge progress between turns
 
 **What this means for each phase:**
 - Phase 1 (Scope): Fetch issue details in ONE call. Do NOT read issue comments separately — get them all in one go.
 - Phase 2 (Gather): ONE turn max. Fetch the diff + file list. That's it. Do NOT read entity files, reference files, or upstream dependencies here.
-- Phase 3 (Deploy): Spawn reviewers in batches of 2-3 per turn. Acknowledge which reviewers were launched, wait for results, then spawn the next batch.
-- Phase 6 (Execute): Same batching — spawn fix agents 2-3 per turn per parallelization group.
-- Phase 7 (Verify): Single agent — no batching needed.
 
-**Between batches, briefly tell the user what's happening** — e.g., "Reviewers 1-3 deployed, waiting for results..." This prevents the appearance of stalling.
+**Between steps, briefly tell the user what's happening** — e.g., "Running reviewer 2/7 (Security)..." or "Reviewers 1-3 deployed, waiting for results..." This prevents the appearance of stalling.
 
 ## Phase 1: Determine Review Scope
 
