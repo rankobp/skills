@@ -64,7 +64,8 @@ Prefixes: `corr` (Correctness), `qual` (Code Quality), `sec` (Security), `perf` 
 
 ## Coordinator Notes
 
-- Spawn ALL reviewers in parallel in a single turn — do not wait for one to finish before starting the next.
+- Spawn reviewers in **batches of 2-3 per turn**, not all at once. This is critical for connection stability — spawning 6+ sub-agents in one turn will drop the connection.
 - Each reviewer is a `general` sub-agent. The domain expertise comes from the brief and the prompt, not from the agent type.
 - If the diff is large (500+ lines), give each reviewer only the files relevant to their domain, plus a summary of what else changed.
 - If a reviewer sub-agent fails, see the failure handling rules in SKILL.md Phase 3.
+- Between batches, briefly tell the user what's happening (e.g., "Batch 1/3 deployed, waiting...") to prevent the appearance of stalling.
